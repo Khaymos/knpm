@@ -427,7 +427,9 @@ fn write_traversal_archive(base: &TestDir) -> PathBuf {
     // Deliberately bypass append_data's path checks. KNPM must reject an
     // archive crafted by an untrusted package publisher.
     let mut header = Header::new_gnu();
-    header.set_path("../outside").expect("set malicious archive member path");
+    header
+        .set_path("../outside")
+        .expect("set malicious archive member path");
     header.set_entry_type(EntryType::Regular);
     header.set_size(0);
     header.set_mode(0o644);
