@@ -1690,11 +1690,10 @@ fn main() {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::{write::GzEncoder, Compression};
+    use flate2::{Compression, write::GzEncoder};
     use std::io::empty;
     use tar::{Builder, EntryType, Header};
 
@@ -1725,12 +1724,7 @@ mod tests {
             .expect("append test directory");
     }
 
-    fn append_file(
-        builder: &mut Builder<GzEncoder<File>>,
-        path: &str,
-        bytes: &[u8],
-        mode: u32,
-    ) {
+    fn append_file(builder: &mut Builder<GzEncoder<File>>, path: &str, bytes: &[u8], mode: u32) {
         let mut header = Header::new_gnu();
         header.set_entry_type(EntryType::Regular);
         header.set_size(bytes.len() as u64);
@@ -1793,10 +1787,7 @@ mod tests {
     #[test]
     fn accepts_valid_versions() {
         for version in ["1", "1.2.3", "16.1.0", "1.0~rc1", "2:1.4+khaymos"] {
-            assert!(
-                valid_version(version),
-                "expected {version:?} to be valid"
-            );
+            assert!(valid_version(version), "expected {version:?} to be valid");
         }
     }
 
@@ -1844,7 +1835,10 @@ mod tests {
         assert_eq!(metadata.version, "1.0");
         assert_eq!(metadata.arch, "x86_64");
         assert_eq!(metadata.description, "Demo package");
-        assert_eq!(metadata.depends, vec!["glibc".to_string(), "zlib".to_string()]);
+        assert_eq!(
+            metadata.depends,
+            vec!["glibc".to_string(), "zlib".to_string()]
+        );
     }
 
     #[test]
@@ -1861,10 +1855,9 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_architecture() {
-        let text = String::from_utf8(metadata_text("")).unwrap().replace(
-            "arch=x86_64",
-            "arch=aarch64",
-        );
+        let text = String::from_utf8(metadata_text(""))
+            .unwrap()
+            .replace("arch=x86_64", "arch=aarch64");
         assert!(parse_metadata(text.as_bytes()).is_err());
     }
 
@@ -1884,7 +1877,10 @@ mod tests {
         assert_eq!(parsed["usr/bin"].kind, Kind::Directory);
         assert_eq!(parsed["usr/bin/demo"].kind, Kind::File);
         assert_eq!(parsed["usr/bin/demo"].sha256, hash_bytes(payload));
-        assert_eq!(parse_manifest(&serialize_manifest(&parsed)).unwrap(), parsed);
+        assert_eq!(
+            parse_manifest(&serialize_manifest(&parsed)).unwrap(),
+            parsed
+        );
     }
 
     #[test]
