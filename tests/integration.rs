@@ -324,8 +324,20 @@ fn override_transfers_file_ownership_between_packages() {
 fn failed_override_restores_the_original_file() {
     let temp = TestDir::new();
     let root = temp.root();
-    let old_archive = write_package(&temp, "old-tool", &[], "usr/bin/shared-tool", b"old version");
-    let new_archive = write_package(&temp, "new-tool", &[], "usr/bin/shared-tool", b"new version");
+    let old_archive = write_package(
+        &temp,
+        "old-tool",
+        &[],
+        "usr/bin/shared-tool",
+        b"old version",
+    );
+    let new_archive = write_package(
+        &temp,
+        "new-tool",
+        &[],
+        "usr/bin/shared-tool",
+        b"new version",
+    );
 
     let install_old = run_knpm(&root, &["install", old_archive.to_str().unwrap()]);
     assert_success(&install_old, "install old package");
