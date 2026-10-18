@@ -1,0 +1,16 @@
+[package]
+name = "knpm"
+version = "0.1.0"
+edition = "2024"
+description = "Khayil's Nexus Package Manager for KhaymOS"
+license = "MIT"
+
+[[bin]]
+name = "knpm"
+path = "src/main.rs"
+
+[dependencies]
+flate2 = "1"
+tar = "0.4"
+sha2 = "0.10"
+libc = "0.2"
