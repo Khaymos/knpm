@@ -421,29 +421,35 @@ fn write_package_with_symlink(base: &TestDir) -> PathBuf {
 fn write_traversal_archive(base: &TestDir) -> PathBuf {
     let path = base.0.join("traversal.khmpkg");
     let file = File::create(&path).expect("create traversal test archive");
-    let encoder = GzEncoder::new(file, Compression::default());
-    let mut builder = Builder::new(encoder);
+    let mut encoder = GzEncoder::new(file, Compression::default());
 
-    // Deliberately bypass append_data's path checks. KNPM must reject an
-    // archive crafted by an untrusted package publisher.
-    let mut header = Header::new_gnu();
-    header
-        .set_path("../outside")
-        .expect("set malicious archive member path");
-    header.set_entry_type(EntryType::Regular);
-    header.set_size(0);
-    header.set_mode(0o644);
-    header.set_mtime(0);
-    header.set_cksum();
-    builder
-        .append(&header, empty())
-        .expect("append deliberately unsafe archive member");
+    // Construct the 512-byte POSIX tar header directly: the tar crate's
+    // public header/path helpers intentionally reject parent-directory paths.
+    let mut header = [0_u8; 512];
+    let name = b"../outside";
+    header[..name.len()].copy_from_slice(name);
+    header[100..108].copy_from_slice(b"0000644\0");
+    header[108..116].copy_from_slice(b"0000000\0");
+    header[116..124].copy_from_slice(b"0000000\0");
+    header[124..136].copy_from_slice(b"00000000000\0");
+    header[136..148].copy_from_slice(b"00000000000\0");
+    header[148..156].fill(b' ');
+    header[156] = b'0';
+    header[257..263].copy_from_slice(b"ustar\0");
+    header[263..265].copy_from_slice(b"00");
 
-    builder
-        .into_inner()
-        .expect("finish traversal test tar archive")
-        .finish()
-        .expect("finish traversal test gzip stream");
+    let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+    let checksum_field = format!("{checksum:06o}\0 ");
+    assert_eq!(checksum_field.len(), 8);
+    header[148..156].copy_from_slice(checksum_field.as_bytes());
+
+    encoder
+        .write_all(&header)
+        .expect("write malicious tar header");
+    encoder
+        .write_all(&[0_u8; 1024])
+        .expect("write tar end markers");
+    encoder.finish().expect("finish traversal test gzip stream");
 
     path
 }
