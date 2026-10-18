@@ -370,3 +370,197 @@ fn failed_override_restores_the_original_file() {
         .collect();
     assert_eq!(entries, vec![std::ffi::OsString::from("shared-tool")]);
 }
+
+
+fn append_symlink<W: Write>(builder: &mut Builder<W>, path: &str, target: &str) {
+    let mut header = Header::new_gnu();
+    header.set_entry_type(EntryType::Symlink);
+    header.set_size(0);
+    header.set_mode(0o777);
+    header.set_mtime(0);
+    builder
+        .append_link(&mut header, path, target)
+        .expect("append symbolic link to test package");
+}
+
+fn write_package_with_symlink(base: &TestDir) -> PathBuf {
+    let package_name = "demo-links";
+    let payload = b"symlink target contents\n";
+    let target = "real";
+    let metadata = format!(
+        "format=KHMPKG-1\nname={package_name}\nversion=1.0\narch=x86_64\ndescription=Symlink integration test\ndepends=\n"
+    );
+    let manifest = format!(
+        "D\t0755\t-\tusr\nD\t0755\t-\tusr/bin\nF\t0755\t{}\tusr/bin/real\nL\t0777\t{}\tusr/bin/shortcut\n",
+        sha256(payload),
+        sha256(target.as_bytes())
+    );
+
+    let path = base.0.join(format!("{package_name}.khmpkg"));
+    let file = File::create(&path).expect("create symlink test package");
+    let encoder = GzEncoder::new(file, Compression::default());
+    let mut builder = Builder::new(encoder);
+
+    append_dir(&mut builder, "CONTROL");
+    append_file(&mut builder, "CONTROL/metadata", metadata.as_bytes(), 0o644);
+    append_file(&mut builder, "CONTROL/manifest", manifest.as_bytes(), 0o644);
+    append_dir(&mut builder, "data");
+    append_dir(&mut builder, "data/usr");
+    append_dir(&mut builder, "data/usr/bin");
+    append_file(&mut builder, "data/usr/bin/real", payload, 0o755);
+    append_symlink(&mut builder, "data/usr/bin/shortcut", target);
+
+    builder
+        .into_inner()
+        .expect("finish symlink test tar archive")
+        .finish()
+        .expect("finish symlink test gzip stream");
+
+    path
+}
+
+fn write_traversal_archive(base: &TestDir) -> PathBuf {
+    let path = base.0.join("traversal.khmpkg");
+    let file = File::create(&path).expect("create traversal test archive");
+    let encoder = GzEncoder::new(file, Compression::default());
+    let mut builder = Builder::new(encoder);
+
+    // Deliberately create an unsafe archive member to test KNPM's parser.
+    append_file(&mut builder, "../outside", b"must never be extracted", 0o644);
+
+    builder
+        .into_inner()
+        .expect("finish traversal test tar archive")
+        .finish()
+        .expect("finish traversal test gzip stream");
+
+    path
+}
+
+#[test]
+fn install_and_remove_package_symlink() {
+    let temp = TestDir::new();
+    let root = temp.root();
+    let archive = write_package_with_symlink(&temp);
+
+    let install = run_knpm(&root, &["install", archive.to_str().unwrap()]);
+    assert_success(&install, "install package containing a relative symlink");
+
+    let real_file = root.join("usr/bin/real");
+    let shortcut = root.join("usr/bin/shortcut");
+    assert_eq!(fs::read_link(&shortcut).unwrap(), Path::new("real"));
+    assert_eq!(fs::read(&shortcut).unwrap(), fs::read(&real_file).unwrap());
+
+    let remove = run_knpm(&root, &["remove", "demo-links"]);
+    assert_success(&remove, "remove package containing a relative symlink");
+    assert!(!real_file.exists(), "target file should be removed");
+    assert!(!shortcut.exists(), "symlink should be removed");
+    assert!(
+        !root.join("var/lib/knpm/installed/demo-links").exists(),
+        "package record should be removed"
+    );
+}
+
+#[test]
+fn refuses_to_remove_a_dependency_used_by_another_package() {
+    let temp = TestDir::new();
+    let root = temp.root();
+    let dependency = write_package(
+        &temp,
+        "libbase",
+        &[],
+        "usr/lib/libbase.so",
+        b"library placeholder",
+    );
+    let app = write_package(&temp, "demo-app", &["libbase"], "usr/bin/demo-app", b"app");
+
+    let install_dependency = run_knpm(&root, &["install", dependency.to_str().unwrap()]);
+    assert_success(&install_dependency, "install libbase");
+
+    let install_app = run_knpm(&root, &["install", app.to_str().unwrap()]);
+    assert_success(&install_app, "install package depending on libbase");
+
+    let remove_dependency = run_knpm(&root, &["remove", "libbase"]);
+    assert_failure(&remove_dependency, "remove dependency still required by demo-app");
+    assert!(
+        String::from_utf8_lossy(&remove_dependency.stderr).contains("required by demo-app"),
+        "unexpected dependency-removal error: {}",
+        String::from_utf8_lossy(&remove_dependency.stderr)
+    );
+    assert!(
+        root.join("var/lib/knpm/installed/libbase").exists(),
+        "required dependency record must remain"
+    );
+    assert!(
+        root.join("usr/lib/libbase.so").exists(),
+        "required dependency files must remain"
+    );
+}
+
+#[test]
+fn refuses_to_remove_a_package_if_an_installed_file_was_modified() {
+    let temp = TestDir::new();
+    let root = temp.root();
+    let archive = write_package(&temp, "demo", &[], "usr/bin/demo", b"original content");
+
+    let install = run_knpm(&root, &["install", archive.to_str().unwrap()]);
+    assert_success(&install, "install demo");
+
+    let installed_file = root.join("usr/bin/demo");
+    fs::write(&installed_file, b"modified after installation").unwrap();
+
+    let remove = run_knpm(&root, &["remove", "demo"]);
+    assert_failure(&remove, "remove package with modified payload");
+    assert!(
+        String::from_utf8_lossy(&remove.stderr).contains("installed file was modified"),
+        "unexpected removal error: {}",
+        String::from_utf8_lossy(&remove.stderr)
+    );
+    assert_eq!(
+        fs::read(&installed_file).unwrap(),
+        b"modified after installation",
+        "KNPM must not delete a file it can no longer verify"
+    );
+    assert!(
+        root.join("var/lib/knpm/installed/demo").exists(),
+        "package record should remain when removal is refused"
+    );
+}
+
+#[test]
+fn rejects_archive_path_traversal_before_installation() {
+    let temp = TestDir::new();
+    let root = temp.root();
+    let archive = write_traversal_archive(&temp);
+
+    let install = run_knpm(&root, &["install", archive.to_str().unwrap()]);
+    assert_failure(&install, "install archive containing a traversal member");
+    assert!(
+        String::from_utf8_lossy(&install.stderr).contains("unsafe package path"),
+        "unexpected traversal error: {}",
+        String::from_utf8_lossy(&install.stderr)
+    );
+    assert!(
+        !temp.0.join("outside").exists(),
+        "archive traversal must not write outside the extraction directory"
+    );
+    assert!(
+        !root.join("var/lib/knpm").exists(),
+        "invalid archive must be rejected before creating the target package database"
+    );
+}
+
+#[test]
+fn rejects_non_archive_package_without_modifying_target_root() {
+    let temp = TestDir::new();
+    let root = temp.root();
+    let archive = temp.0.join("broken.khmpkg");
+    fs::write(&archive, b"this is not a gzip-compressed tar archive").unwrap();
+
+    let install = run_knpm(&root, &["install", archive.to_str().unwrap()]);
+    assert_failure(&install, "install malformed package archive");
+    assert!(
+        !root.join("var/lib/knpm").exists(),
+        "malformed archive must not create package database files"
+    );
+}
