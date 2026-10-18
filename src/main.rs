@@ -1689,3 +1689,305 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::empty;
+    use tar::{Builder, EntryType, Header};
+
+    fn metadata_text(depends: &str) -> Vec<u8> {
+        format!(
+            "format=KHMPKG-1\nname=demo\nversion=1.0\narch=x86_64\ndescription=Demo package\ndepends={depends}\n"
+        )
+        .into_bytes()
+    }
+
+    fn manifest_text(payload: &[u8], mode: u32) -> Vec<u8> {
+        format!(
+            "D\t0755\t-\tusr\nD\t0755\t-\tusr/bin\nF\t{mode:04o}\t{}\tusr/bin/demo\n",
+            hash_bytes(payload)
+        )
+        .into_bytes()
+    }
+
+    fn append_dir(builder: &mut Builder<GzEncoder<File>>, path: &str) {
+        let mut header = Header::new_gnu();
+        header.set_entry_type(EntryType::Directory);
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_mtime(0);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, empty())
+            .expect("append test directory");
+    }
+
+    fn append_file(
+        builder: &mut Builder<GzEncoder<File>>,
+        path: &str,
+        bytes: &[u8],
+        mode: u32,
+    ) {
+        let mut header = Header::new_gnu();
+        header.set_entry_type(EntryType::Regular);
+        header.set_size(bytes.len() as u64);
+        header.set_mode(mode);
+        header.set_mtime(0);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, bytes)
+            .expect("append test file");
+    }
+
+    fn write_test_archive(
+        temp: &TempDir,
+        metadata: &[u8],
+        manifest: &[u8],
+        payload_path: &str,
+        payload: &[u8],
+        duplicate_payload: bool,
+    ) -> PathBuf {
+        let path = temp.0.join("test.khmpkg");
+        let file = File::create(&path).expect("create test package");
+        let encoder = GzEncoder::new(file, Compression::default());
+        let mut builder = Builder::new(encoder);
+
+        append_dir(&mut builder, "CONTROL");
+        append_dir(&mut builder, "data");
+        append_file(&mut builder, "CONTROL/metadata", metadata, 0o644);
+        append_file(&mut builder, "CONTROL/manifest", manifest, 0o644);
+        append_dir(&mut builder, "data/usr");
+        append_dir(&mut builder, "data/usr/bin");
+        append_file(&mut builder, payload_path, payload, 0o755);
+
+        if duplicate_payload {
+            append_file(&mut builder, payload_path, payload, 0o755);
+        }
+
+        builder
+            .into_inner()
+            .expect("finish test tar archive")
+            .finish()
+            .expect("finish test gzip stream");
+
+        path
+    }
+
+    #[test]
+    fn accepts_valid_package_names() {
+        for name in ["bash", "gcc-runtime", "lib32+compat", "x.y_z"] {
+            assert!(valid_name(name), "expected {name:?} to be valid");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_package_names() {
+        for name in ["", ".hidden", "-leading", "name/path", "with space", "é"] {
+            assert!(!valid_name(name), "expected {name:?} to be invalid");
+        }
+    }
+
+    #[test]
+    fn accepts_valid_versions() {
+        for version in ["1", "1.2.3", "16.1.0", "1.0~rc1", "2:1.4+khaymos"] {
+            assert!(
+                valid_version(version),
+                "expected {version:?} to be valid"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_versions() {
+        for version in ["", ".1", "-1", "version with spaces", "1/2"] {
+            assert!(
+                !valid_version(version),
+                "expected {version:?} to be invalid"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_safe_relative_paths() {
+        for path in ["bin/knpm", "usr/bin/bash", "usr/share/doc/knpm/README"] {
+            assert!(validate_relpath(path).is_ok(), "rejected {path:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_unsafe_relative_paths() {
+        for path in [
+            "",
+            "/etc/passwd",
+            "../escape",
+            "usr/../etc/passwd",
+            "usr//bin/knpm",
+            "usr/./bin",
+            "usr/\tbin",
+            "usr/\nfile",
+        ] {
+            assert!(
+                validate_relpath(path).is_err(),
+                "accepted unsafe path {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parses_metadata_and_dependencies() {
+        let metadata = parse_metadata(&metadata_text("glibc,zlib")).unwrap();
+
+        assert_eq!(metadata.name, "demo");
+        assert_eq!(metadata.version, "1.0");
+        assert_eq!(metadata.arch, "x86_64");
+        assert_eq!(metadata.description, "Demo package");
+        assert_eq!(metadata.depends, ["glibc", "zlib"]);
+    }
+
+    #[test]
+    fn rejects_duplicate_metadata_fields() {
+        let text = String::from_utf8(metadata_text("")).unwrap() + "name=another\n";
+        assert!(parse_metadata(text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_unknown_metadata_fields() {
+        let text = String::from_utf8(metadata_text("")).unwrap() + "maintainer=somebody\n";
+        assert!(parse_metadata(text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_unsupported_architecture() {
+        let text = String::from_utf8(metadata_text("")).unwrap().replace(
+            "arch=x86_64",
+            "arch=aarch64",
+        );
+        assert!(parse_metadata(text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_dependency_names() {
+        assert!(parse_metadata(&metadata_text("glibc,../evil")).is_err());
+    }
+
+    #[test]
+    fn serializes_and_parses_manifest_consistently() {
+        let payload = b"test executable\n";
+        let manifest = manifest_text(payload, 0o755);
+        let parsed = parse_manifest(&manifest).unwrap();
+
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed["usr"].kind, Kind::Directory);
+        assert_eq!(parsed["usr/bin"].kind, Kind::Directory);
+        assert_eq!(parsed["usr/bin/demo"].kind, Kind::File);
+        assert_eq!(parsed["usr/bin/demo"].sha256, hash_bytes(payload));
+        assert_eq!(parse_manifest(&serialize_manifest(&parsed)).unwrap(), parsed);
+    }
+
+    #[test]
+    fn rejects_unsorted_manifest_paths() {
+        let text = format!(
+            "F\t0755\t{}\tusr/bin/demo\nD\t0755\t-\tusr\nD\t0755\t-\tusr/bin\n",
+            hash_bytes(b"x")
+        );
+        assert!(parse_manifest(text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_manifest_entries_without_parent_directories() {
+        let text = format!("F\t0755\t{}\tusr/bin/demo\n", hash_bytes(b"x"));
+        assert!(parse_manifest(text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_manifest_path_traversal() {
+        let text = format!("F\t0755\t{}\t../escape\n", hash_bytes(b"x"));
+        assert!(parse_manifest(text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn inspect_archive_accepts_a_valid_package() {
+        let temp = TempDir::new().unwrap();
+        let payload = b"test executable\n";
+        let archive = write_test_archive(
+            &temp,
+            &metadata_text(""),
+            &manifest_text(payload, 0o755),
+            "data/usr/bin/demo",
+            payload,
+            false,
+        );
+
+        let package = inspect_archive(&archive).unwrap();
+
+        assert_eq!(package.metadata.name, "demo");
+        assert_eq!(package.metadata.version, "1.0");
+        assert_eq!(package.entries.len(), 3);
+    }
+
+    #[test]
+    fn inspect_archive_rejects_payload_digest_mismatch() {
+        let temp = TempDir::new().unwrap();
+        let manifest = manifest_text(b"different payload", 0o755);
+        let archive = write_test_archive(
+            &temp,
+            &metadata_text(""),
+            &manifest,
+            "data/usr/bin/demo",
+            b"actual payload",
+            false,
+        );
+
+        assert!(inspect_archive(&archive).is_err());
+    }
+
+    #[test]
+    fn inspect_archive_rejects_duplicate_members() {
+        let temp = TempDir::new().unwrap();
+        let payload = b"test executable\n";
+        let archive = write_test_archive(
+            &temp,
+            &metadata_text(""),
+            &manifest_text(payload, 0o755),
+            "data/usr/bin/demo",
+            payload,
+            true,
+        );
+
+        assert!(inspect_archive(&archive).is_err());
+    }
+
+    #[test]
+    fn inspect_archive_rejects_malformed_metadata() {
+        let temp = TempDir::new().unwrap();
+        let payload = b"test executable\n";
+        let metadata = String::from_utf8(metadata_text("")).unwrap() + "name=duplicate\n";
+        let archive = write_test_archive(
+            &temp,
+            metadata.as_bytes(),
+            &manifest_text(payload, 0o755),
+            "data/usr/bin/demo",
+            payload,
+            false,
+        );
+
+        assert!(inspect_archive(&archive).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_package_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempDir::new().unwrap();
+        let real_file = temp.0.join("real.khmpkg");
+        fs::write(&real_file, b"not a package").unwrap();
+        let symlink_path = temp.0.join("link.khmpkg");
+        symlink(&real_file, &symlink_path).unwrap();
+
+        assert!(open_regular_package(&symlink_path).is_err());
+    }
+}
