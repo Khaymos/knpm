@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     fs::{self, File},
-    io::{empty, Write},
+    io::{Write, empty},
     path::{Path, PathBuf},
     process::{Command, Output},
     time::{SystemTime, UNIX_EPOCH},
@@ -87,7 +87,11 @@ fn write_package(
     payload: &[u8],
 ) -> PathBuf {
     assert!(!payload_path.starts_with('/'));
-    assert!(payload_path.split('/').all(|part| !part.is_empty() && part != "." && part != ".."));
+    assert!(
+        payload_path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
+    );
 
     let mut directories = BTreeSet::new();
     let components: Vec<&str> = payload_path.split('/').collect();
@@ -99,10 +103,7 @@ fn write_package(
     for directory in &directories {
         manifest.push_str(&format!("D\t0755\t-\t{directory}\n"));
     }
-    manifest.push_str(&format!(
-        "F\t0755\t{}\t{payload_path}\n",
-        sha256(payload)
-    ));
+    manifest.push_str(&format!("F\t0755\t{}\t{payload_path}\n", sha256(payload)));
 
     let metadata = format!(
         "format=KHMPKG-1\nname={package_name}\nversion=1.0\narch=x86_64\ndescription=Integration test package\ndepends={}\n",
@@ -177,7 +178,10 @@ fn installs_lists_and_removes_a_package_in_a_temporary_root() {
     let installed_file = root.join("usr/bin/demo");
     assert_eq!(fs::read(&installed_file).unwrap(), payload);
     assert_eq!(
-        fs::metadata(&installed_file).unwrap().permissions().readonly(),
+        fs::metadata(&installed_file)
+            .unwrap()
+            .permissions()
+            .readonly(),
         false
     );
 
@@ -196,7 +200,10 @@ fn installs_lists_and_removes_a_package_in_a_temporary_root() {
         !root.join("var/lib/knpm/installed/demo").exists(),
         "package database record should be removed"
     );
-    assert!(!root.join("usr/bin").exists(), "created directories should be cleaned up");
+    assert!(
+        !root.join("usr/bin").exists(),
+        "created directories should be cleaned up"
+    );
 }
 
 #[test]
@@ -213,7 +220,10 @@ fn enforces_dependencies_before_installation() {
         "unexpected dependency error: {}",
         String::from_utf8_lossy(&missing_dependency.stderr)
     );
-    assert!(!app_file.exists(), "package payload must not be installed on dependency failure");
+    assert!(
+        !app_file.exists(),
+        "package payload must not be installed on dependency failure"
+    );
 
     let glibc = write_package(
         &temp,
@@ -227,7 +237,10 @@ fn enforces_dependencies_before_installation() {
 
     let install_app = run_knpm(&root, &["install", app.to_str().unwrap()]);
     assert_success(&install_app, "install app after dependency");
-    assert!(app_file.exists(), "app payload should exist after dependencies are installed");
+    assert!(
+        app_file.exists(),
+        "app payload should exist after dependencies are installed"
+    );
 }
 
 #[test]
@@ -257,8 +270,20 @@ fn refuses_to_overwrite_an_unowned_existing_file() {
 fn override_transfers_file_ownership_between_packages() {
     let temp = TestDir::new();
     let root = temp.root();
-    let old_archive = write_package(&temp, "old-tool", &[], "usr/bin/shared-tool", b"old version");
-    let new_archive = write_package(&temp, "new-tool", &[], "usr/bin/shared-tool", b"new version");
+    let old_archive = write_package(
+        &temp,
+        "old-tool",
+        &[],
+        "usr/bin/shared-tool",
+        b"old version",
+    );
+    let new_archive = write_package(
+        &temp,
+        "new-tool",
+        &[],
+        "usr/bin/shared-tool",
+        b"new version",
+    );
 
     let install_old = run_knpm(&root, &["install", old_archive.to_str().unwrap()]);
     assert_success(&install_old, "install old package");
