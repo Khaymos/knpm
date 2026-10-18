@@ -371,7 +371,6 @@ fn failed_override_restores_the_original_file() {
     assert_eq!(entries, vec![std::ffi::OsString::from("shared-tool")]);
 }
 
-
 fn append_symlink<W: Write>(builder: &mut Builder<W>, path: &str, target: &str) {
     let mut header = Header::new_gnu();
     header.set_entry_type(EntryType::Symlink);
@@ -426,7 +425,12 @@ fn write_traversal_archive(base: &TestDir) -> PathBuf {
     let mut builder = Builder::new(encoder);
 
     // Deliberately create an unsafe archive member to test KNPM's parser.
-    append_file(&mut builder, "../outside", b"must never be extracted", 0o644);
+    append_file(
+        &mut builder,
+        "../outside",
+        b"must never be extracted",
+        0o644,
+    );
 
     builder
         .into_inner()
@@ -481,7 +485,10 @@ fn refuses_to_remove_a_dependency_used_by_another_package() {
     assert_success(&install_app, "install package depending on libbase");
 
     let remove_dependency = run_knpm(&root, &["remove", "libbase"]);
-    assert_failure(&remove_dependency, "remove dependency still required by demo-app");
+    assert_failure(
+        &remove_dependency,
+        "remove dependency still required by demo-app",
+    );
     assert!(
         String::from_utf8_lossy(&remove_dependency.stderr).contains("required by demo-app"),
         "unexpected dependency-removal error: {}",
