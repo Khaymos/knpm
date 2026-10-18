@@ -424,13 +424,18 @@ fn write_traversal_archive(base: &TestDir) -> PathBuf {
     let encoder = GzEncoder::new(file, Compression::default());
     let mut builder = Builder::new(encoder);
 
-    // Deliberately create an unsafe archive member to test KNPM's parser.
-    append_file(
-        &mut builder,
-        "../outside",
-        b"must never be extracted",
-        0o644,
-    );
+    // Deliberately bypass append_data's path checks. KNPM must reject an
+    // archive crafted by an untrusted package publisher.
+    let mut header = Header::new_gnu();
+    header.set_path("../outside").expect("set malicious archive member path");
+    header.set_entry_type(EntryType::Regular);
+    header.set_size(0);
+    header.set_mode(0o644);
+    header.set_mtime(0);
+    header.set_cksum();
+    builder
+        .append(&header, empty())
+        .expect("append deliberately unsafe archive member");
 
     builder
         .into_inner()
