@@ -1844,7 +1844,7 @@ mod tests {
         assert_eq!(metadata.version, "1.0");
         assert_eq!(metadata.arch, "x86_64");
         assert_eq!(metadata.description, "Demo package");
-        assert_eq!(metadata.depends, ["glibc", "zlib"]);
+        assert_eq!(metadata.depends, vec!["glibc".to_string(), "zlib".to_string()]);
     }
 
     #[test]
