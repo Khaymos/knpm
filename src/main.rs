@@ -1585,7 +1585,6 @@ fn remove_package(name: &str) -> Result<()> {
     Ok(())
 }
 
-
 const DEFAULT_MIRRORLIST_PATH: &str = "/etc/knpm/mirrorlist";
 const DEFAULT_REPOSITORY_ARCH: &str = "x86_64";
 const DEFAULT_REPOSITORY_NAME: &str = "khaymos";
@@ -1658,10 +1657,7 @@ fn parse_mirrorlist(contents: &str) -> Result<Vec<String>> {
         }
 
         let url = normalize_mirror_url(line).map_err(|error| {
-            invalid(format!(
-                "invalid mirror URL on line {}: {error}",
-                index + 1
-            ))
+            invalid(format!("invalid mirror URL on line {}: {error}", index + 1))
         })?;
 
         if !mirrors.iter().any(|existing| existing == &url) {
@@ -1682,7 +1678,10 @@ fn parse_mirrorlist(contents: &str) -> Result<Vec<String>> {
 
 fn load_mirrorlist(path: &Path) -> Result<Vec<String>> {
     let contents = fs::read_to_string(path).map_err(|error| {
-        invalid(format!("cannot read mirrorlist {}: {error}", path.display()))
+        invalid(format!(
+            "cannot read mirrorlist {}: {error}",
+            path.display()
+        ))
     })?;
     parse_mirrorlist(&contents)
 }
@@ -2153,5 +2152,4 @@ ignored.example/repo
         assert!(parse_mirrorlist("[mirror]\\nhttps://user@example.invalid/repo\\n").is_err());
         assert!(parse_mirrorlist("[mirror]\\nhttps://example.invalid/repo?x=1\\n").is_err());
     }
-
 }
