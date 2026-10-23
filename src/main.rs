@@ -1598,11 +1598,11 @@ fn normalize_mirror_url(value: &str) -> Result<String> {
     }
 
     let expanded = value
-        .replace("\${arch}", DEFAULT_REPOSITORY_ARCH)
+        .replace("${arch}", DEFAULT_REPOSITORY_ARCH)
         .replace("$arch", DEFAULT_REPOSITORY_ARCH)
-        .replace("\${khaymos}", DEFAULT_REPOSITORY_NAME)
+        .replace("${khaymos}", DEFAULT_REPOSITORY_NAME)
         .replace("$khaymos", DEFAULT_REPOSITORY_NAME)
-        .replace("\${repo}", DEFAULT_REPOSITORY_NAME)
+        .replace("${repo}", DEFAULT_REPOSITORY_NAME)
         .replace("$repo", DEFAULT_REPOSITORY_NAME);
 
     let url = if expanded.contains("://") {
@@ -2126,7 +2126,7 @@ mod tests {
 # Official mirror first.
 [mirror]
 khaymos.duckdns.org/repo/$arch/$khaymos
-https://backup.example/repo/\${arch}/\${repo}/
+https://backup.example/repo/${arch}/${repo}/
 https://backup.example/repo/x86_64/khaymos
 [other]
 ignored.example/repo
