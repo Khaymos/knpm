@@ -561,7 +561,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
             std::process::id()
         ));
         let mut options = OpenOptions::new();
-        options.write(true).create_new(true).mode(0o600);
+        options.write(true).create_new(true).mode(0o644);
 
         let mut file = match options.open(&temporary) {
             Ok(file) => file,
