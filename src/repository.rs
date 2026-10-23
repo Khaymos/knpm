@@ -1,12 +1,12 @@
 use super::{
-    database_path, hash_reader, inspect_archive, install, invalid, load_mirrorlist,
-    open_regular_package, require_privilege_for_system, resolve_root, valid_name, valid_version,
-    Result, TempDir,
+    Result, TempDir, database_path, hash_reader, inspect_archive, install, invalid,
+    load_mirrorlist, open_regular_package, require_privilege_for_system, resolve_root, valid_name,
+    valid_version,
 };
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
-    fs::{self, File, OpenOptions, Permissions},
+    fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
@@ -70,7 +70,9 @@ fn parse_index(bytes: &[u8]) -> Result<Vec<RepositoryPackage>> {
     for (offset, line) in lines.enumerate() {
         let line_number = offset + 3;
         if line.is_empty() {
-            return Err(invalid(format!("empty repository index record on line {line_number}")));
+            return Err(invalid(format!(
+                "empty repository index record on line {line_number}"
+            )));
         }
 
         let fields: Vec<&str> = line.split('\t').collect();
@@ -89,26 +91,38 @@ fn parse_index(bytes: &[u8]) -> Result<Vec<RepositoryPackage>> {
         let description = fields[6];
 
         if !valid_name(name) {
-            return Err(invalid(format!("invalid package name on index line {line_number}")));
+            return Err(invalid(format!(
+                "invalid package name on index line {line_number}"
+            )));
         }
         if !valid_version(version) {
-            return Err(invalid(format!("invalid package version on index line {line_number}")));
+            return Err(invalid(format!(
+                "invalid package version on index line {line_number}"
+            )));
         }
         if arch != "x86_64" && arch != "noarch" {
-            return Err(invalid(format!("unsupported package architecture on index line {line_number}")));
+            return Err(invalid(format!(
+                "unsupported package architecture on index line {line_number}"
+            )));
         }
         if !safe_filename(filename) {
-            return Err(invalid(format!("unsafe package filename on index line {line_number}")));
+            return Err(invalid(format!(
+                "unsafe package filename on index line {line_number}"
+            )));
         }
         if sha256.len() != 64
             || !sha256
                 .chars()
                 .all(|ch| ch.is_ascii_digit() || ('a'..='f').contains(&ch))
         {
-            return Err(invalid(format!("invalid SHA-256 on index line {line_number}")));
+            return Err(invalid(format!(
+                "invalid SHA-256 on index line {line_number}"
+            )));
         }
         if description.chars().any(char::is_control) {
-            return Err(invalid(format!("invalid description on index line {line_number}")));
+            return Err(invalid(format!(
+                "invalid description on index line {line_number}"
+            )));
         }
 
         let depends = if depends_text.is_empty() {
@@ -146,7 +160,11 @@ fn parse_index(bytes: &[u8]) -> Result<Vec<RepositoryPackage>> {
             version.to_string(),
             filename.to_string(),
         );
-        if previous_key.as_ref().map(|previous| previous > &key).unwrap_or(false) {
+        if previous_key
+            .as_ref()
+            .map(|previous| previous > &key)
+            .unwrap_or(false)
+        {
             return Err(invalid("repository index records are not sorted"));
         }
         previous_key = Some(key);
@@ -313,7 +331,9 @@ fn resolve_dependency(
         return Ok(());
     }
     if !visiting.insert(name.to_string()) {
-        return Err(invalid(format!("dependency cycle detected at package: {name}")));
+        return Err(invalid(format!(
+            "dependency cycle detected at package: {name}"
+        )));
     }
 
     let package = select_package(records, name)?.clone();
@@ -503,9 +523,9 @@ fn cache_path(root: &Path, create: bool) -> Result<Option<PathBuf>> {
     let path = database.join("repository-cache-v1");
 
     match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
-            Err(invalid("repository cache must be a regular, non-symlink file"))
-        }
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Err(invalid(
+            "repository cache must be a regular, non-symlink file",
+        )),
         Ok(_) => Ok(Some(path)),
         Err(error) if error.kind() == io::ErrorKind::NotFound && !create => Ok(None),
         Err(error) if error.kind() == io::ErrorKind::NotFound && create => Ok(Some(path)),
@@ -590,7 +610,10 @@ fn fetch_repository(mirrors: &[String]) -> Result<(String, Vec<u8>, Vec<Reposito
     )))
 }
 
-fn read_cached_repository(root: &Path, mirrors: &[String]) -> Result<(String, Vec<u8>, Vec<RepositoryPackage>)> {
+fn read_cached_repository(
+    root: &Path,
+    mirrors: &[String],
+) -> Result<(String, Vec<u8>, Vec<RepositoryPackage>)> {
     let path = cache_path(root, false)?
         .ok_or_else(|| invalid("no cached repository index; run 'knpm sync' first"))?;
     let metadata = fs::symlink_metadata(&path)?;
@@ -620,7 +643,10 @@ fn read_cached_repository(root: &Path, mirrors: &[String]) -> Result<(String, Ve
     Ok((base.to_string(), index, records))
 }
 
-fn fetch_and_cache(root: &Path, mirrors: &[String]) -> Result<(String, Vec<u8>, Vec<RepositoryPackage>)> {
+fn fetch_and_cache(
+    root: &Path,
+    mirrors: &[String],
+) -> Result<(String, Vec<u8>, Vec<RepositoryPackage>)> {
     let (base, bytes, records) = fetch_repository(mirrors)?;
     write_cache(root, &base, &bytes)?;
     Ok((base, bytes, records))
@@ -649,7 +675,9 @@ fn installed_names(root: &Path) -> Result<HashSet<String>> {
         }
         let record = super::read_record_metadata(&item.path())?;
         if record.name != name {
-            return Err(invalid(format!("installed package record name mismatch: {name}")));
+            return Err(invalid(format!(
+                "installed package record name mismatch: {name}"
+            )));
         }
         installed.insert(name.to_string());
     }
@@ -799,8 +827,14 @@ pub(super) fn search(query: Option<&str>) -> Result<()> {
     }
 
     println!("Repository: {base}");
-    println!("{:<28} {:<16} {:<10} DESCRIPTION", "NAME", "VERSION", "ARCH");
-    println!("{:<28} {:<16} {:<10} -----------", "----", "-------", "----");
+    println!(
+        "{:<28} {:<16} {:<10} DESCRIPTION",
+        "NAME", "VERSION", "ARCH"
+    );
+    println!(
+        "{:<28} {:<16} {:<10} -----------",
+        "----", "-------", "----"
+    );
     for record in &results {
         println!(
             "{:<28} {:<16} {:<10} {}",
@@ -877,8 +911,22 @@ mod tests {
     #[test]
     fn parses_a_valid_repository_index() {
         let index = make_index(&[
-            index_row("bash", "5.3", "x86_64", "bash-5.3.khmpkg", "glibc", "GNU shell"),
-            index_row("glibc", "2.44", "x86_64", "glibc-2.44.khmpkg", "", "GNU C library"),
+            index_row(
+                "bash",
+                "5.3",
+                "x86_64",
+                "bash-5.3.khmpkg",
+                "glibc",
+                "GNU shell",
+            ),
+            index_row(
+                "glibc",
+                "2.44",
+                "x86_64",
+                "glibc-2.44.khmpkg",
+                "",
+                "GNU C library",
+            ),
         ]);
         let records = parse_index(&index).unwrap();
         assert_eq!(records.len(), 2);
@@ -902,7 +950,14 @@ mod tests {
         let duplicate = index_row("bash", "5.3", "x86_64", "bash-5.3.khmpkg", "", "shell");
         assert!(parse_index(&make_index(&[duplicate.clone(), duplicate])).is_err());
 
-        let first = index_row("zlib", "1.0", "x86_64", "zlib-1.0.khmpkg", "", "compression");
+        let first = index_row(
+            "zlib",
+            "1.0",
+            "x86_64",
+            "zlib-1.0.khmpkg",
+            "",
+            "compression",
+        );
         let second = index_row("bash", "5.3", "x86_64", "bash-5.3.khmpkg", "", "shell");
         assert!(parse_index(&make_index(&[first, second])).is_err());
     }
@@ -938,7 +993,10 @@ mod tests {
         ];
         let order = resolve_install_order("bash", &records, &HashSet::new()).unwrap();
         assert_eq!(
-            order.iter().map(|record| record.name.as_str()).collect::<Vec<_>>(),
+            order
+                .iter()
+                .map(|record| record.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["glibc", "bash"]
         );
     }
