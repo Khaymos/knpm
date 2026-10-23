@@ -1714,6 +1714,7 @@ knpm verify PACKAGE.khmpkg\n\
 knpm info PACKAGE.khmpkg\n\
 knpm adopt PACKAGE.khmpkg\n\
 knpm list\n\
+knpm install PACKAGE_NAME [--override]\n\
 knpm install PACKAGE.khmpkg [--override]\n\
 knpm install --override PACKAGE.khmpkg\n\
 knpm remove PACKAGE_NAME\n\
