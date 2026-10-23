@@ -1639,9 +1639,9 @@ fn parse_mirrorlist(contents: &str) -> Result<Vec<String>> {
     let mut mirrors = Vec::<String>::new();
 
     for (index, raw_line) in contents.lines().enumerate() {
-        let line = raw_line.split('#').next().unwrap_or_default().trim();
+        let line = raw_line.trim();
 
-        if line.is_empty() {
+        if line.is_empty() || line.starts_with('#') {
             continue;
         }
 
@@ -2151,5 +2151,6 @@ ignored.example/repo
         assert!(parse_mirrorlist("[mirror]\nftp://example.invalid/repo\n").is_err());
         assert!(parse_mirrorlist("[mirror]\nhttps://user@example.invalid/repo\n").is_err());
         assert!(parse_mirrorlist("[mirror]\nhttps://example.invalid/repo?x=1\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\nhttps://example.invalid/repo#fragment\n").is_err());
     }
 }
