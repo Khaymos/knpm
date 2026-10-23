@@ -12,6 +12,8 @@ use std::{
 };
 use tar::Archive;
 
+mod repository;
+
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const MAX_COMPRESSED_PACKAGE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -1715,6 +1717,8 @@ knpm list\n\
 knpm install PACKAGE.khmpkg [--override]\n\
 knpm install --override PACKAGE.khmpkg\n\
 knpm remove PACKAGE_NAME\n\
+knpm sync\n\
+knpm search [QUERY]\n\
 knpm mirrors [MIRRORLIST_FILE]\n\
 knpm help\n\
 For a disposable target root, set KNPM_ROOT=/path/to/root."
@@ -1788,7 +1792,23 @@ fn run() -> Result<()> {
                 }
             };
 
-            install(Path::new(package_arg), override_existing)?;
+            if package_arg.ends_with(".khmpkg") || Path::new(package_arg).exists() {
+                install(Path::new(package_arg), override_existing)?;
+            } else {
+                repository::install_by_name(package_arg, override_existing)?;
+            }
+        }
+        Some("sync") => {
+            if args.len() != 2 {
+                return Err(invalid("usage: knpm sync"));
+            }
+            repository::sync()?;
+        }
+        Some("search") => {
+            if args.len() > 3 {
+                return Err(invalid("usage: knpm search [QUERY]"));
+            }
+            repository::search(args.get(2).map(String::as_str))?;
         }
         Some("mirrors") | Some("mirrorlist") => {
             if args.len() > 3 {
