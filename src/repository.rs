@@ -778,7 +778,7 @@ pub(super) fn sync() -> Result<()> {
     let root = resolve_root()?;
     require_privilege_for_system(&root)?;
     let mirrors = load_mirrorlist(&super::configured_mirrorlist_path())?;
-    let (base, bytes, records) = fetch_and_cache(&root, &mirrors)?;
+    let (base, _bytes, records) = fetch_and_cache(&root, &mirrors)?;
 
     println!("Repository synchronized: {} package(s)", records.len());
     println!("Mirror: {base}");
