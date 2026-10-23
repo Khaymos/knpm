@@ -2143,13 +2143,13 @@ ignored.example/repo
     #[test]
     fn mirrorlist_requires_a_mirror_section_and_entry() {
         assert!(parse_mirrorlist("https://example.invalid/repo").is_err());
-        assert!(parse_mirrorlist("[mirror]\\n# only a comment\\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\n# only a comment\n").is_err());
     }
 
     #[test]
     fn mirrorlist_rejects_unsupported_schemes_and_credentials() {
-        assert!(parse_mirrorlist("[mirror]\\nftp://example.invalid/repo\\n").is_err());
-        assert!(parse_mirrorlist("[mirror]\\nhttps://user@example.invalid/repo\\n").is_err());
-        assert!(parse_mirrorlist("[mirror]\\nhttps://example.invalid/repo?x=1\\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\nftp://example.invalid/repo\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\nhttps://user@example.invalid/repo\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\nhttps://example.invalid/repo?x=1\n").is_err());
     }
 }
