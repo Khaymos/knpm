@@ -1585,6 +1585,124 @@ fn remove_package(name: &str) -> Result<()> {
     Ok(())
 }
 
+const DEFAULT_MIRRORLIST_PATH: &str = "/etc/knpm/mirrorlist";
+const DEFAULT_REPOSITORY_ARCH: &str = "x86_64";
+const DEFAULT_REPOSITORY_NAME: &str = "khaymos";
+
+fn normalize_mirror_url(value: &str) -> Result<String> {
+    let value = value.trim();
+
+    if value.is_empty() || value.contains(['\t', '\r', '\n', ' ']) {
+        return Err(invalid("mirror URL is empty or contains whitespace"));
+    }
+
+    let expanded = value
+        .replace("${arch}", DEFAULT_REPOSITORY_ARCH)
+        .replace("$arch", DEFAULT_REPOSITORY_ARCH)
+        .replace("${khaymos}", DEFAULT_REPOSITORY_NAME)
+        .replace("$khaymos", DEFAULT_REPOSITORY_NAME)
+        .replace("${repo}", DEFAULT_REPOSITORY_NAME)
+        .replace("$repo", DEFAULT_REPOSITORY_NAME);
+
+    let url = if expanded.contains("://") {
+        expanded
+    } else {
+        format!("https://{expanded}")
+    };
+
+    let (scheme, remainder) = url
+        .split_once("://")
+        .ok_or_else(|| invalid("mirror URL must use HTTP or HTTPS"))?;
+
+    if scheme != "https" && scheme != "http" {
+        return Err(invalid("mirror URL must use HTTP or HTTPS"));
+    }
+
+    let authority = remainder.split('/').next().unwrap_or_default();
+
+    if authority.is_empty()
+        || authority.contains('@')
+        || authority.contains(['?', '#', '\\'])
+        || remainder.contains(['?', '#', '\\'])
+    {
+        return Err(invalid(
+            "mirror URL must have a host and must not contain credentials, a query, or a fragment",
+        ));
+    }
+
+    Ok(url.trim_end_matches('/').to_string())
+}
+
+fn parse_mirrorlist(contents: &str) -> Result<Vec<String>> {
+    let mut in_mirror_section = false;
+    let mut found_mirror_section = false;
+    let mut mirrors = Vec::<String>::new();
+
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line = raw_line.trim();
+
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            let section = line[1..line.len() - 1].trim();
+            in_mirror_section = section == "mirror";
+            found_mirror_section |= in_mirror_section;
+            continue;
+        }
+
+        if !in_mirror_section {
+            continue;
+        }
+
+        let url = normalize_mirror_url(line).map_err(|error| {
+            invalid(format!("invalid mirror URL on line {}: {error}", index + 1))
+        })?;
+
+        if !mirrors.iter().any(|existing| existing == &url) {
+            mirrors.push(url);
+        }
+    }
+
+    if !found_mirror_section {
+        return Err(invalid("mirrorlist is missing the [mirror] section"));
+    }
+
+    if mirrors.is_empty() {
+        return Err(invalid("mirrorlist contains no usable mirror URLs"));
+    }
+
+    Ok(mirrors)
+}
+
+fn load_mirrorlist(path: &Path) -> Result<Vec<String>> {
+    let contents = fs::read_to_string(path).map_err(|error| {
+        invalid(format!(
+            "cannot read mirrorlist {}: {error}",
+            path.display()
+        ))
+    })?;
+    parse_mirrorlist(&contents)
+}
+
+fn configured_mirrorlist_path() -> PathBuf {
+    env::var_os("KNPM_MIRRORLIST")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_MIRRORLIST_PATH))
+}
+
+fn list_mirrors(path: &Path) -> Result<()> {
+    let mirrors = load_mirrorlist(path)?;
+    println!("Mirrorlist: {}", path.display());
+
+    for (index, mirror) in mirrors.iter().enumerate() {
+        println!("{:>2}. {}", index + 1, mirror);
+    }
+
+    Ok(())
+}
+
 fn usage() {
     eprintln!(
         "KNPM — Khayil's Nexus Package Manager\n\
@@ -1597,6 +1715,7 @@ knpm list\n\
 knpm install PACKAGE.khmpkg [--override]\n\
 knpm install --override PACKAGE.khmpkg\n\
 knpm remove PACKAGE_NAME\n\
+knpm mirrors [MIRRORLIST_FILE]\n\
 knpm help\n\
 For a disposable target root, set KNPM_ROOT=/path/to/root."
     );
@@ -1670,6 +1789,19 @@ fn run() -> Result<()> {
             };
 
             install(Path::new(package_arg), override_existing)?;
+        }
+        Some("mirrors") | Some("mirrorlist") => {
+            if args.len() > 3 {
+                return Err(invalid("usage: knpm mirrors [MIRRORLIST_FILE]"));
+            }
+
+            let path = if args.len() == 3 {
+                PathBuf::from(&args[2])
+            } else {
+                configured_mirrorlist_path()
+            };
+
+            list_mirrors(&path)?;
         }
         Some("remove") | Some("uninstall") => {
             if args.len() != 3 {
@@ -1985,5 +2117,40 @@ mod tests {
         symlink(&real_file, &symlink_path).unwrap();
 
         assert!(open_regular_package(&symlink_path).is_err());
+    }
+
+    #[test]
+    fn parses_mirrorlist_expands_placeholders_and_preserves_order() {
+        let input = r#"
+# Official mirror first.
+[mirror]
+khaymos.duckdns.org/repo/$arch/$khaymos
+https://backup.example/repo/${arch}/${repo}/
+https://backup.example/repo/x86_64/khaymos
+[other]
+ignored.example/repo
+"#;
+
+        assert_eq!(
+            parse_mirrorlist(input).unwrap(),
+            vec![
+                "https://khaymos.duckdns.org/repo/x86_64/khaymos",
+                "https://backup.example/repo/x86_64/khaymos",
+            ]
+        );
+    }
+
+    #[test]
+    fn mirrorlist_requires_a_mirror_section_and_entry() {
+        assert!(parse_mirrorlist("https://example.invalid/repo").is_err());
+        assert!(parse_mirrorlist("[mirror]\n# only a comment\n").is_err());
+    }
+
+    #[test]
+    fn mirrorlist_rejects_unsupported_schemes_and_credentials() {
+        assert!(parse_mirrorlist("[mirror]\nftp://example.invalid/repo\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\nhttps://user@example.invalid/repo\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\nhttps://example.invalid/repo?x=1\n").is_err());
+        assert!(parse_mirrorlist("[mirror]\nhttps://example.invalid/repo#fragment\n").is_err());
     }
 }
