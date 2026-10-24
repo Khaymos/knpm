@@ -1719,6 +1719,8 @@ knpm install PACKAGE.khmpkg [--override]\n\
 knpm install --override PACKAGE.khmpkg\n\
 knpm remove PACKAGE_NAME\n\
 knpm sync\n\
+knpm update\n\
+knpm outdated\n\
 knpm search [QUERY]\n\
 knpm mirrors [MIRRORLIST_FILE]\n\
 knpm help\n\
@@ -1799,11 +1801,17 @@ fn run() -> Result<()> {
                 repository::install_by_name(package_arg, override_existing)?;
             }
         }
-        Some("sync") => {
+        Some("sync") | Some("update") => {
             if args.len() != 2 {
-                return Err(invalid("usage: knpm sync"));
+                return Err(invalid("usage: knpm sync|update"));
             }
             repository::sync()?;
+        }
+        Some("outdated") => {
+            if args.len() != 2 {
+                return Err(invalid("usage: knpm outdated"));
+            }
+            repository::outdated()?;
         }
         Some("search") => {
             if args.len() > 3 {
