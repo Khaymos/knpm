@@ -615,7 +615,7 @@ fn read_cached_repository(
     mirrors: &[String],
 ) -> Result<(String, Vec<u8>, Vec<RepositoryPackage>)> {
     let path = cache_path(root, false)?
-        .ok_or_else(|| invalid("no cached repository index; run 'knpm sync' first"))?;
+        .ok_or_else(|| invalid("no cached repository index; run 'knpm sync' or 'knpm update' first"))?;
     let metadata = fs::symlink_metadata(&path)?;
     if metadata.len() > MAX_INDEX_BYTES + 4096 {
         return Err(invalid("cached repository index exceeds the size limit"));
@@ -683,6 +683,66 @@ fn installed_names(root: &Path) -> Result<HashSet<String>> {
     }
 
     Ok(installed)
+}
+
+fn installed_versions(root: &Path) -> Result<HashMap<String, String>> {
+    let mut installed = HashMap::new();
+    let Some(database) = database_path(root, false)? else {
+        return Ok(installed);
+    };
+    let directory = database.join("installed");
+
+    for item in fs::read_dir(directory)? {
+        let item = item?;
+        let filename = item.file_name();
+        let Some(name) = filename.to_str() else {
+            return Err(invalid("non-UTF-8 installed package database entry"));
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let metadata = fs::symlink_metadata(item.path())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(invalid(format!("invalid installed package record: {name}")));
+        }
+
+        let record = super::read_record_metadata(&item.path())?;
+        if record.name != name {
+            return Err(invalid(format!(
+                "installed package record name mismatch: {name}"
+            )));
+        }
+        installed.insert(name.to_string(), record.version);
+    }
+
+    Ok(installed)
+}
+
+fn available_updates(
+    installed: &HashMap<String, String>,
+    records: &[RepositoryPackage],
+) -> Vec<(String, String, String)> {
+    let mut updates = Vec::new();
+
+    for (name, installed_version) in installed {
+        let Ok(available) = select_package(records, name) else {
+            // Locally installed packages do not need to exist in the configured
+            // repository to remain installed.
+            continue;
+        };
+
+        if compare_versions(&available.version, installed_version) == Ordering::Greater {
+            updates.push((
+                name.clone(),
+                installed_version.clone(),
+                available.version.clone(),
+            ));
+        }
+    }
+
+    updates.sort_by(|left, right| left.0.cmp(&right.0));
+    updates
 }
 
 fn verify_download(path: &Path, expected: &RepositoryPackage) -> Result<()> {
@@ -845,6 +905,38 @@ pub(super) fn search(query: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn outdated() -> Result<()> {
+    let root = resolve_root()?;
+    let installed = installed_versions(&root)?;
+
+    if installed.is_empty() {
+        println!("No packages installed.");
+        return Ok(());
+    }
+
+    let mirrors = load_mirrorlist(&super::configured_mirrorlist_path())?;
+    let (base, _bytes, records) = read_cached_repository(&root, &mirrors)?;
+    let updates = available_updates(&installed, &records);
+
+    if updates.is_empty() {
+        println!("All installed packages are up to date.");
+        println!("Checked repository: {base}");
+        return Ok(());
+    }
+
+    println!("Repository: {base}");
+    println!("{:<28} {:<16} AVAILABLE", "NAME", "INSTALLED");
+    println!("{:<28} {:<16} ---------", "----", "---------");
+    for (name, installed_version, available_version) in &updates {
+        println!("{:<28} {:<16} {}", name, installed_version, available_version);
+    }
+    println!("\n{} update(s) available.", updates.len());
+    println!("Run 'knpm update' to refresh the repository index.");
+    println!("Package upgrades are not implemented yet.");
+
+    Ok(())
+}
+
 pub(super) fn install_by_name(name: &str, override_existing: bool) -> Result<()> {
     if !valid_name(name) {
         return Err(invalid(format!("invalid package name: {name}")));
@@ -967,6 +1059,65 @@ mod tests {
         assert_eq!(compare_versions("10.0", "9.9"), Ordering::Greater);
         assert_eq!(compare_versions("1:1.0", "2.0"), Ordering::Greater);
         assert_eq!(compare_versions("1.0~rc1", "1.0"), Ordering::Less);
+    }
+
+    #[test]
+    fn finds_newer_available_versions_for_installed_packages() {
+        let installed = HashMap::from([
+            ("bash".to_string(), "5.2".to_string()),
+            ("glibc".to_string(), "2.44".to_string()),
+            ("local-only".to_string(), "1.0".to_string()),
+        ]);
+        let records = vec![
+            RepositoryPackage {
+                name: "bash".to_string(),
+                version: "5.3".to_string(),
+                arch: "x86_64".to_string(),
+                filename: "bash-5.3.khmpkg".to_string(),
+                sha256: "a".repeat(64),
+                depends: Vec::new(),
+                description: "shell".to_string(),
+            },
+            RepositoryPackage {
+                name: "bash".to_string(),
+                version: "5.3".to_string(),
+                arch: "noarch".to_string(),
+                filename: "bash-5.3-noarch.khmpkg".to_string(),
+                sha256: "b".repeat(64),
+                depends: Vec::new(),
+                description: "shell".to_string(),
+            },
+            RepositoryPackage {
+                name: "glibc".to_string(),
+                version: "2.44".to_string(),
+                arch: "x86_64".to_string(),
+                filename: "glibc-2.44.khmpkg".to_string(),
+                sha256: "c".repeat(64),
+                depends: Vec::new(),
+                description: "GNU C library".to_string(),
+            },
+        ];
+
+        assert_eq!(
+            available_updates(&installed, &records),
+            vec![("bash".to_string(), "5.2".to_string(), "5.3".to_string())]
+        );
+    }
+
+    #[test]
+    fn does_not_report_downgrades_as_updates() {
+        let installed = HashMap::from([("bash".to_string(), "9.0".to_string())]);
+        let records = vec![RepositoryPackage {
+            name: "bash".to_string(),
+            version: "5.3".to_string(),
+            arch: "x86_64".to_string(),
+            filename: "bash-5.3.khmpkg".to_string(),
+            sha256: "a".repeat(64),
+            depends: Vec::new(),
+            description: "shell".to_string(),
+        }];
+
+        assert!(available_updates(&installed, &records).is_empty());
     }
 
     #[test]
