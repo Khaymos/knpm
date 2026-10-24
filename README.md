@@ -23,10 +23,13 @@ KNPM uses the repository base URLs in the configured mirrorlist to fetch the ver
 
 ```sh
 sudo knpm sync
+# Equivalent command to refresh the repository index:
+sudo knpm update
 knpm search bash
+knpm outdated
 sudo knpm install bash
 ```
 
-`knpm sync` downloads the index and caches it under `/var/lib/knpm/repository-cache-v1`. `knpm search [QUERY]` searches that cache, so sync before searching for the first time or after repository updates. `knpm install PACKAGE_NAME` refreshes the index, resolves dependencies, downloads every required archive before changing the system, checks each full-file SHA-256 against the index, validates package metadata and its internal manifest, and installs dependencies before the requested package. Use `KNPM_ROOT=/path/to/root` for a disposable target root.
+`knpm sync` downloads the repository index and caches it under `/var/lib/knpm/repository-cache-v1`; `knpm update` is an alias for the same index refresh. `knpm search [QUERY]` searches the cached index, so sync or update before searching for the first time or after repository changes. `knpm outdated` compares installed package versions with the cached index and reports newer versions, but does not install upgrades. `knpm install PACKAGE_NAME` refreshes the index, resolves dependencies, downloads every required archive before changing the system, checks each full-file SHA-256 against the index, validates package metadata and its internal manifest, and installs dependencies before the requested package. Use `KNPM_ROOT=/path/to/root` for a disposable target root.
 
 Remote operations currently use the system `curl` command for HTTP(S) transport. HTTPS is preferred for public repositories. The index checksum detects file corruption or mirror mismatch; it does not authenticate a compromised index. Signed repository metadata and package upgrades are not implemented yet.
