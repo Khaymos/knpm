@@ -29,7 +29,7 @@ https://khaymos.duckdns.org/repo/x86_64/khaymos
 
 ## Remote repository behavior
 
-The `knpm mirrors` command validates and prints configured URLs. `knpm sync` tries mirrors in order, fetches `index.tsv`, validates the `KHAYMOS-REPO-INDEX-1` header and package records, and caches the selected index. `knpm search [QUERY]` searches the cached index; run sync first.
+The `knpm mirrors` command validates and prints configured URLs. `knpm sync` (also available as `knpm update`) tries mirrors in order, fetches `index.tsv`, validates the `KHAYMOS-REPO-INDEX-1` header and package records, and caches the selected index. `knpm search [QUERY]` searches the cached index; run sync/update first. `knpm outdated` compares installed package versions with the cached index and lists newer versions available from the repository. It is read-only and does not upgrade packages.
 
 `knpm install PACKAGE_NAME` refreshes the index, resolves named dependencies, downloads packages from configured mirrors, checks the SHA-256 of the complete archive against the index, confirms that the archive metadata matches the index, and then passes each archive through KNPM's existing package/manifest validation before installing it. Dependencies are installed first. All required archives are fetched and verified before installation starts.
 
